@@ -1,0 +1,494 @@
+---
+title: "Lab Assignment 2"
+author: "Student"
+date: 
+output: pdf_document
+fig.cap: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## For this lab you will need the following libraries: 
+##rgdal, rgeos, raster, spatstat, tmap, knitr
+# 
+# install.packages("rgdal")
+# install.packages("rgeos")
+# install.packages("raster")
+# install.packages("spatstat") # too old for current v of R
+# install.packages("tmap")
+# install.packages("knitr")
+# install.packages('tinytex')
+# tinytex:: install_tinytex()
+
+library("knitr")
+library("rgdal")
+library("raster")
+library("tmap")
+library("rgeos")
+library("spatstat")
+library("tinytex")
+
+dir <- "C:/Users/philk/Desktop/Spring 2022/Geog 418/Assignment 2/Assignment2"
+#setwd(dir)
+knitr::opts_knit$set(root.dir = dir)
+
+```
+# Geography 418: Assignment 2 **Spatial Distribution Analysis of Mischief and Breaking and Entering Occurences in the Vancouver Area** 
+
+## Introduction
+
+|           Understanding patterns in criminal activity provides the opportunity to interpret the reasoning or sources of the crimes studied. Being aware of the spatial correlation of specific crimes can also allow for mitigation techniques to be employed reducing the frequency and potentially in a perfect world treat the cause instead of the symptoms of the activity. Through the course of this analysis the spatial attributes of criminal mischief and residential breaking and entering of residential and other (BNE) will be analyzed by a variety of point pattern analysis techniques during 2019. The spatial statistical tests that were used are: quadrat analysis, nearest neighbour analysis, k-function analysis, and kernel density estimation. With the results from each test determining potential influencing factors but the main focus will be characterizing the spatial correlation of the crimes mentioned will conclude this analysis. 
+
+```{r Data Cleaning, echo=FALSE, eval=TRUE, message=FALSE, warning=TRUE, error =TRUE}
+
+##Read in and clean data
+VanCity <- readOGR(".", "local-area-boundary", verbose = FALSE)
+VanCrime <- read.csv("crimedata_csv_all_years.csv")
+
+#clean up the columns
+VanCrime_Clean <- VanCrime[which(VanCrime$YEAR == 2019),] #tbd
+#range(VanCrime_Clean$YEAR)
+
+#omit values with NA
+VanCrime_Clean <- na.omit(VanCrime_Clean)
+#range(VanCrime_Clean$X)
+
+
+VanCrime_Clean <- VanCrime_Clean[which(VanCrime_Clean$X > 0),] #rm 0s
+#range(VanCrime_Clean$X)
+#range(VanCrime_Clean$Y)
+
+#names(VanCrime_Clean)
+#head(VanCrime_Clean)
+
+Coords <- VanCrime_Clean[,c("X", "Y")]
+#Coords <- cbind(VanCrime_Clean$X, VanCrime_Clean$Y)
+crs <- CRS("+init=epsg:32610") 
+
+#create a file type called a SpatialPointsDataFrame
+VanCrimePoints <- SpatialPointsDataFrame(coords = Coords, data = VanCrime_Clean, proj4string = crs )
+
+#transform the projection of both datasets to ensure that they are the same
+VanCrimePoints <- spTransform(VanCrimePoints, CRS("+init=epsg:3005"))
+VanCity <- spTransform(VanCity, CRS("+init=epsg:3005"))
+
+#intersect the two datasets
+VanCrimePoints <- raster::intersect(VanCrimePoints, VanCity)
+
+#convert the crimes data type to factor
+VanCrimePoints@data$TYPE <- as.factor(VanCrimePoints@data$TYPE)
+#levels(VanCrimePoints$TYPE)
+
+kma.1 <- VanCrimePoints[which(VanCrimePoints$TYPE == "Mischief"),] # select type , # ~ 5300 instances 
+kma.1$x <- coordinates(kma.1)[,1]
+kma.1$y <- coordinates(kma.1)[,2]
+
+
+kma.2 <- VanCrimePoints[which(VanCrimePoints$TYPE == "Break and Enter Residential/Other"),] # should be ~ 2400
+kma.2$x <- coordinates(kma.2)[,1]
+kma.2$y <- coordinates(kma.2)[,2]
+
+#check for and remove duplicated points --- no diff between x,y 
+#first, finds zero distance among points to see if there are any duplicates
+zd1 <- zerodist(kma.1)
+#zd1
+zd2 <- zerodist(kma.2)
+#zd2 # make 2 of these 
+
+#if there are duplicates, remove them
+kma.1 <- remove.duplicates(kma.1) # do this twice 
+kma.2 <- remove.duplicates(kma.2)
+
+
+#create an "extent" object which can be used to create the observation window for spatstat
+kma1.ext <- as.matrix(extent(kma.1))  # depending on kma.ppp defermine if need 2
+#kma1.ext
+kma2.ext <- as.matrix(extent(kma.2))
+#kma2.ext
+
+#observation window
+window <- as.owin(list(xrange = kma1.ext[1,], yrange = kma1.ext[2,])) 
+
+window2 <- as.owin(list(xrange = kma2.ext[1,], yrange = kma2.ext[2,]))
+
+
+#create ppp oject from spatstat
+kma.ppp <- ppp(x = kma.1$X, y = kma.1$Y, window = window)
+
+kma2.ppp <- ppp(x = kma.2$X, y = kma.2$Y, window = window2) 
+
+#might want multiple windows or single window for both crime types
+
+# regos gUNIOUN
+#gUnion() for shared wnidow
+joinCrime <- rbind(kma.1, kma.2)
+joinext <- as.matrix(extent(joinCrime)) 
+window3 <- as.owin(list(xrange = joinext[1,], yrange = joinext[2,]))
+
+```
+
+
+## Study Area
+  
+|           The region this analysis is performed on is Vancouver area. The greater Vancouver area itself has a population of nearly two and a half million (Statistics Canada, 2016) people making it the largest population center in BC as well as the Canadian Coastal Pacific. 
+
+```{r Study Area Map, eval=TRUE, echo=FALSE, error=TRUE, fig.cap="Vancouver British Columbia", fig.asp=0.5, warning=TRUE}
+
+#find a way to feed bounding box from the shapefile
+
+bounding <- extent(VanCity)
+plot(VanCity)
+
+#coords --> find x max, x min and as well as y, add an additional 1000m 
+# alt. look for a better route function, find m^2? 
+
+```
+
+
+## Data
+
+|           The data collect for this study was taken from the Vancouver Police Department's open-source data catalog. The data collected is also known to be offset and to have reduced accuracy to protect people and locations nearby and associated to the crime reports.
+|           Data cleaning was performed prior to analysis for this report, the focus of the cleaning was to remove years, crimes and locations that were not associated with this specific analysis. Removing locations which were left blank for the protection of identity or for crimes which we committed at an unknown location, wherein x,y UTM coordinates were set to 0. 
+
+## Methods
+
+### **Nearest Neighbour Distance**
+  
+|           The nearest neighbour analysis is a statistical method developed by David Waugh for comparing point patterns or spatial correlation based upon their randomness, clustering, or dispersion.  The process starts by summing the Euclidean distance of each point in a dataset then dividing by the total number of point / observations in the dataset which is the mean nearest neighbour distance [1]. Following that the point density over the total area is calculated which will be used to determine what an ideal or random nearest neighbour distribution [2]. Additionally, a dispersed iteration of the equation [3] is also produced to aid in comparison. The equation is then standardized [4] for local comparison of different areas. Finally, onto determining significance of the nearest neighbour analysis we can use a Z-test using formula [6] to determine whether the spatial distribution of the pattern is random or not.   
+  
+  $$\overline{NND} = \frac{\Sigma NND} {n}$$ $(1)$  
+  
+  $$\overline{NND_{R}} = \frac{1}{2\sqrt{Density}}$$  $(2)$ $$\overline{NND_{D}} = \frac{1.07453} {\sqrt{Density}}$$  $(3)$
+  
+  $$R = \frac {\overline{NND}} {\overline{NND_{R}}}$$ $(4)$
+  
+  $$\sigma_{\overline{NND}} = \frac {0.26136} {\sqrt{Density}}$$ $(5)$
+ 
+  $$Z_{n} = \displaystyle \frac {\overline{NND} - \overline{NND_{R}}} {simga _{\overline{NND}}}$$ $(6)$
+  
+
+### **Quadrat Analysis**
+  
+|           Quadrat analysis is based upon counting the number of points within a cell, of a specified size and taking note of how many cells feature that many number of points.  Together these variables are used to produce the mean [7] within the quadrat analysis enabling standardized comparison. This mean divided by the variance [8] produces variance mean ratio (VMR) which can then use a chi square test [9] to determine whether there is clustering to be found within the data set.
+|           For this analysis the quadrats selected were based larger than the typical Canadian city (~100m x ~200m) so quadrat sizes were roughly 300x 300 meters. This totaled with 1600 quadrats or 40 x 40 quadrats were developed for both portions of the study.   
+
+  $$MEAN = \frac {Number of Points in the Dataset (n)} {Number of Quadrats (m)}$$ $(7)$
+  
+  $$VAR = \frac {\sum f_{i}x^{2}_{i} - [\frac {(\sum f_{i}x_{i})^2} {m}]} {m-1}$$ $(8)$
+  
+  $$VMR = \frac {VAR} {MEAN}$$ $(9)$
+ 
+  $$X^{2} = VMR(m-1)$$ $(10)$
+  
+
+
+### **K-Function [11]**
+  
+|           This method produces a graphically representation for determining spatial characteristics. Similarly, to Quadrat analysis it utilizes point density, E represents the estimated number of points within the specific distance d, and N is the number of points with the given distance d. This allows us the determine whether a data set is clustered at a specific distance. The values from the k- function can be compared on a graph with [12] or the complete spatial random output to determine the spatial pattern being analyzed.  
+
+  $$K(d) = \lambda^{-1} E(N_{d})$$ $(11)$
+  
+  $$K_{CSR}(d) = \pi d^{2}$$ $(12)$
+  
+  
+  
+### **Kernel Density Estimation [13]**
+  
+|           The kernel density estimation provides a method which presents data in a spatial format for visualization. To do this a specific cell size is determined and the density of points within a circle at each  point creating a ‘kernel’.  Looking at the formula we see that C is the circle with radius r is placed at each p or point. Then to be divided by the area of the circle C. 
+|	For this portion of the analysis multiple circle/ kernel sizes were produced at scales of 50, 100, 200, and 500 meters respectively. 
+
+  $$\hat{\lambda_{p}} = \frac {no. [S \subset C (p,r)]} {\pi r^{2}}$$ $(13)$
+  
+  
+
+## Analysis Ouputs
+
+```{r NN_AN, eval=TRUE, echo=FALSE, fig.asp=1, warning=TRUE, error =TRUE }
+##Nearest Neighbour Distance
+###NEAREST NEIGHBOUR
+nearestNeighbour <- nndist.ppp(kma.ppp) #Mischief
+nearestNeighbour2 <-nndist.ppp(kma2.ppp) #BNE
+
+##Convert the nearestNeighbor object into a dataframe.
+nearestNeighbour=as.data.frame(as.numeric(nearestNeighbour))
+nearestNeighbour2=as.data.frame(as.numeric(nearestNeighbour2))
+##Change the column name to "Distance"
+colnames(nearestNeighbour) = "Distance"
+colnames(nearestNeighbour2) = "Distance"
+
+
+##Calculate the nearest neighbor statistic to test for a random spatial distribution.
+#mean nearest neighbour
+n_pop <- nrow(nearestNeighbour) # sum observations mischief
+n_pop2 <- nrow(nearestNeighbour2) # BNE
+
+summation <- sum(nearestNeighbour)# misch
+summation2 <- sum(nearestNeighbour2) # BNE
+ 
+nnd <- summation / n_pop
+nnd2 <- summation2 / n_pop2
+
+  #mean nearest neighbour for random spatial distribution
+  
+  studyArea <- bounding
+  Van_area <- area(window) # misch
+  Van_area2 <- area(window2)# BNE
+  
+  pointDensity <- n_pop / Van_area # misch
+  pointDensity2 <- n_pop2 /Van_area2#BNE
+  
+  #Mishief
+  r.nnd =   1 / (2*(sqrt(pointDensity)))
+  d.nnd =   1.07453  / (sqrt(pointDensity))
+  R =  nnd / r.nnd
+  SE.NND <- 0.26136 / sqrt(pointDensity)
+  z = (nnd - r.nnd) / SE.NND  # currently not very confident. CANT REJECT NULL
+  
+  #Break n enter
+  r.nnd2 =   1 / (2*(sqrt(pointDensity2)))
+  d.nnd2 =   1.07453  / (sqrt(pointDensity2))
+  R2 =  nnd2 / r.nnd2
+  SE.NND2 <- 0.26136 / sqrt(pointDensity2)
+  z2 = (nnd2 - r.nnd2) / SE.NND2  # currently not very confident. CANT REJECT NULL
+  
+  
+nndResults <- data.frame(NNDd = round(d.nnd,4), 
+                         NNDr = round(r.nnd,4) , 
+                         NND = round(nnd,4), 
+                         Zscore = round(z,4) ) 
+                         #Ratio = NULL )
+
+nndResults2 <- data.frame(NNDd = round(d.nnd2,4), 
+                         NNDr =round(r.nnd2,4) , 
+                         NND = round(nnd2,4), 
+                         Zscore = signif(z2,4) ) 
+
+kable(nndResults, caption = "Nearest Neighbour Analysis Results for Mischief in 2019")
+kable(nndResults2, caption = "Nearest Neighbour Analysis Results for Break and Enter Other in 2019")
+```
+
+```{r Quadrat_Misch, eval=TRUE, echo=FALSE, fig.cap="Mischief Mapped", fig.asp=0.75, warning=TRUE, error =TRUE }
+#####
+##QUADRAT ANALYSIS 
+##First, determine the number of qusdrats 
+quads <-40  # ***CHOOSE NUMBER OF QUADRATS***   # JUSTIFY
+  #https://www.zoology.ubc.ca/~krebs/downloads/krebs_chapter_04_2017.pdf with
+  # a square block?  500m? SIKE, try closer to 50m - 100m reso 
+  # area = 145km^2 root =~ 12m 
+  # greater resolution == lower standard err, higher conf int
+  # dists are ~60m and 100m, block by block basis may be too large
+  #http://webspace.ship.edu/pgmarr/Geo441/Examples/Quadrat%20Analysis.pdf
+  
+qcount <- quadratcount(kma.ppp, nx = quads, ny = quads)
+plot(kma.ppp, pch = "+", cex = 0.5, main = "Mischief in 2019")
+#plot(qcount, add = T, col = "red")
+
+qcount.df <- as.data.frame(qcount)
+  
+##Second, count the number of quadrats with a distinct number of points.
+qcount.df <- plyr::count(qcount.df,'Freq') # need plyr installed?
+##Change the column names so that x=number of points and f=frequency of quadrats with x point.
+colnames(qcount.df) <- c("x","f")
+  
+
+sum.f.x2 <- sum(qcount.df$f*qcount.df$x^2)
+M <-  quads*quads# number of cells  quads^2 ? 
+N <-  n_pop# number of points in dataset
+
+sum.fx.2 <- (sum (qcount.df$f*qcount.df$x))^2
+    
+VAR <- (sum.f.x2 - (sum.fx.2/(quads*quads))) / (quads*quads -1) 
+MEAN <- N/M
+VMR <- VAR / MEAN
+    
+ ##Finally, perform the test statistic to test for the existence of a random spatial pattern.
+chi.square = VMR* (n_pop -1)
+p = 1 - pchisq(chi.square, (M - 1))   # chi square said 0...function is rounding
+# mind p value of zero, R could round.
+# double check w online calculator 
+  
+quadResults <- data.frame(Mean = round(MEAN,3),Variance=  round(VAR,3), "VMR" = round(VMR,3))
+
+kable(quadResults, caption = "Quadrat Analysis Results table for Mischief in 2019")  
+```
+
+```{r Quadrat_BNE, eval=TRUE, echo=FALSE, fig.cap="Break and Enter of Residential and Other Map", fig.asp=0.75, warning=TRUE, error =TRUE }
+# BREAK AND ENTER QUADRAT
+##
+qcount2 <- quadratcount(kma2.ppp, nx = quads, ny = quads)
+plot(kma2.ppp, pch = "+", cex = 0.5, main = "Break and Enter of Residential and Other in 2019")
+#plot(qcount, add = T, col = "red")
+
+qcount2.df <- as.data.frame(qcount2)
+  
+##Second, count the number of quadrats with a distinct number of points.
+qcount2.df <- plyr::count(qcount2.df,'Freq') # need plyr installed?
+##Change the column names so that x=number of points and f=frequency of quadrats with x point.
+colnames(qcount2.df) <- c("x","f")
+
+sum.f.x2_2 <- sum(qcount2.df$f*qcount2.df$x^2)
+M2 <-  quads*quads# number of cells  quads^2 ? 
+N2 <-  n_pop2# number of points in dataset
+
+sum.fx.2_2 <- (sum (qcount2.df$f*qcount2.df$x))^2
+    
+VAR2 <- (sum.f.x2_2 - (sum.fx.2_2/(quads*quads))) / (quads*quads -1) 
+MEAN2 <- N2/M2
+VMR2 <- VAR2 / MEAN2
+    
+ ##Finally, perform the test statistic to test for the existence of a random spatial pattern.
+chi.square2 = VMR2* (n_pop2 -1)
+p2 = 1 - pchisq(chi.square2, (M2 - 1), ncp =1)   # chi square said 0...
+# mind p value of zero, R could round.
+# double check w online calculator 
+  
+quadResults2 <- data.frame( Mean = round(MEAN2,3),Variance=  round(VAR2,3), "VMR"= round(VMR2,3))
+
+kable(quadResults2, caption = "Quadrat Analysis Results table for BNE in 2019 ")  
+```
+
+```{r K_funct_Misch, eval=TRUE, echo=FALSE, fig.cap="K-Function Results for Mischief", fig.asp=0.65, warning=TRUE, error =TRUE}
+
+##K-FUNCTION 
+#basic k-function
+k.fun <- Kest(kma.ppp, correction = "Ripley")
+#plot(k.fun, main = "K Function Results for Mischief in 2019")
+
+#use simulation to test the point pattern against CSR
+k.fun.e <- envelope(kma.ppp, Kest, nsim = 99, correction = "Ripley", verbose = FALSE)
+plot(k.fun.e, main = "K Function Results for Mischief in 2019")
+
+```
+
+```{r K_funct_BNE, eval=TRUE, echo=FALSE, fig.cap="K-Function Results for Break and Enter of Residential and Other", fig.asp=0.65, warning=TRUE, error =TRUE}
+k.fun2 <- Kest(kma2.ppp, correction = "Ripley")
+#plot(k.fun2, main ="K Function Results for Break and Enter of Residential or Other in 2019")
+k.fun.e2 <- envelope(kma2.ppp, Kest, nsim = 99, correction = "Ripley", verbose = FALSE)
+plot(k.fun.e2, main = "K Function Results for BNE in 2019")
+
+```
+
+```{r Kernel_Dens_Misch, eval=TRUE, echo=FALSE, fig.cap="Kernel Density of Mischief at scales: 50, 100, 200, 500 meters", fig.asp=0.7, warning=TRUE, error =TRUE }
+###KERNEL DENSITY ESTIMATION
+#2D (gaussian) kernel, compare how bandwidth (sigma) selection influences the point density estimates
+#since data are projected, sigma is represented in metres
+#eps is the width and height of the pixels (1000m X 1000m)
+#coerce to a SpatialGridDataFrame for plotting
+# MISCH
+kde.50 <- density(kma.ppp, sigma = 50, at = "pixels", eps = c(500, 500))
+kde.SG <- as(kde.50, "SpatialGridDataFrame")
+
+kde.100 <- density(kma.ppp, sigma = 100, at = "pixels", eps = c(500, 500))
+kde.SG <- cbind(kde.SG, as(kde.50, "SpatialGridDataFrame"))
+
+kde.200 <- density(kma.ppp, sigma = 200, at = "pixels", eps = c(500, 500)) # change scale of simga
+kde.SG <- cbind(kde.SG, as(kde.100, "SpatialGridDataFrame"))
+
+kde.500 <- density(kma.ppp, sigma = 500, at = "pixels", eps = c(500, 500)) # @ sigma 
+kde.SG <- cbind(kde.SG, as(kde.500, "SpatialGridDataFrame"))
+
+names(kde.SG) <- c('Sigma50', 'Sigma100', 'Sigma200', 'Sigma500')
+spplot(kde.SG, main= "Kernel Density Estimation for Mischiief in 2019")
+
+bw.d <-bw.diggle(kma.ppp)
+```
+
+```{r Kernel_Dens_BNE, eval=TRUE, echo=FALSE, fig.cap="Kernel Density at scales: 50, 100, 200, 500 meters of Break and Enter of Residential", fig.asp=0.7, warning=TRUE, error =TRUE }
+#BNE
+kde.50_2 <- density(kma2.ppp, sigma = 50, at = "pixels", eps = c(300, 300))
+kde.SG_2 <- as(kde.50_2, "SpatialGridDataFrame")
+
+kde.100_2 <- density(kma2.ppp, sigma = 100, at = "pixels", eps = c(300, 300))
+kde.SG_2 <- cbind(kde.SG_2, as(kde.50_2, "SpatialGridDataFrame"))
+
+kde.200_2 <- density(kma2.ppp, sigma = 200, at = "pixels", eps = c(300, 300)) 
+kde.SG_2 <- cbind(kde.SG_2, as(kde.100_2, "SpatialGridDataFrame"))
+
+kde.500_2 <- density(kma2.ppp, sigma = 500, at = "pixels", eps = c(300, 300))  
+kde.SG_2 <- cbind(kde.SG_2, as(kde.500_2, "SpatialGridDataFrame"))
+
+
+names(kde.SG_2) <- c('Sigma50', 'Sigma100', 'Sigma200', 'Sigma500')
+
+#plot
+spplot(kde.SG_2, main= "Kernel Density Estimation for BNE in 2019")
+
+#can see how the bandwidth selection influences the density estimates
+#summary(kde.SG)
+
+#use cross-validation to get the bandwidth that minimizes MSE
+
+bw.d2 <- bw.diggle(kma2.ppp)  #this tries different sigma vals, finds optimal
+```
+
+```{r Mischief Kernel Density Graph, eval=TRUE, echo=FALSE, fig.cap="Mischief Kernel Density Graphed", fig.asp=0.5, warning=TRUE, error =TRUE}
+#plot the "optimal" bandwidth
+plot(bw.d, ylim=c(-10, 10), main= "Mischief Kernel Density Graph") 
+
+```
+
+```{r BNE Kernel Density Graph, eval=TRUE, echo=FALSE, fig.cap="Break and Enter of Residential and Other Kernel Density Graphed", fig.asp=0.5, warning=TRUE, error =TRUE}
+
+plot(bw.d2, ylim=c(-10, 10), main= "BNE Kernel Density Graph") 
+```
+
+```{r Validated-1, eval=TRUE, echo=FALSE, fig.cap="Cross Validated Bandwidth Selection of Mischief Kernel Density Graphed", fig.asp=0.7, warning=TRUE, error =TRUE}
+#density using the cross-validation bandwidth
+kde.bwo <- density(kma.ppp, sigma = bw.d, at = "pixels", eps = c(300, 300))
+plot(kde.bwo, main= "Validated Band for Mischief Kernel Density")
+```
+
+```{r Validated2, eval=TRUE, echo=FALSE, fig.cap="Cross Validated Bandwidth Selection for Break and Enter Kernel Density", fig.asp=0.7, warning=TRUE, error =TRUE}
+kde.bwo2 <- density(kma2.ppp, sigma = bw.d2, at = "pixels", eps = c(300, 300))
+plot(kde.bwo2, main= "Validated Band Selection for BNE Kernel Density ")
+
+```
+
+
+## Results
+
+
+### **Nearest Neighbour Analysis**  
+|           Based upon the results (tables 1-2) of the nearest neighbour analysis in conjunction with its related Z scores we can reject the null hypothesis that the Mischief and the BNE datasets are spatially random. Rather that both data sets exhibit a high and moderate level of clustering respectively. 
+|	Regarding both datasets, there are likely multiple factors impacting their spatial correlation beyond just their zero-order process. Contributing factors which could be driving mischief for example could be correlated to proximity of schools, given that underage males are statistically most likely to be charged for criminal mischief (Mahony, 2017). Factors effecting break and enter statistics similarly could be correlated to medium median income neighbourhoods (Bawagan, 2017).  
+
+  
+### **Quadrat Analysis**  
+|           The results of both quadrat analysis’ (tables 3-4) resulted in a p value small enough that R rounded the value to zero, more specifically the pchisq function utilized to produces inaccuracies at extreme values +/-1e^5. Given the negligible P value we can reject the null hypothesis and confirm that the datasets do not have a random distribution.  
+  
+  
+### **K Function Analysis**  
+|           Using the graphs (figure 4-5) from the k-function compared to the K-complete spatial random data we can affirm that both are noticeably clustered due to their curve over the CSR. Similarly, BNE is also clustered but to a lesser extent.   
+  
+  
+### **Kernel Density Analysis**  
+|           Now looking at the KDE results we can see that there are a few locations which feature a greater density of mischief and BNE in the downtown Vancouver, East Vancouver and Grandview-Woodland locations as seen in figures 6 and 7.  Looking further into figure 6’s 500-meter kernel estimation it appears as though the aforementioned downtown / East Vancouver regions are the only locations exhibiting spatial clustering.  BNE however shows further clustering along the Northern side of the Fraser River. 
+|           That said taking into consideration the ‘optimal’ sigma size for the kernel density appears to lie between 100 and 200 meters. Nevertheless, the map outputs all produce similar maps just ranging in intensity at the specified locations. 
+|           Further along, other order causes for there to be clustering for mischief and BNE are likely correlated to the clustered regions having a lower socioeconomic demographic at those locations. Additionally, a BNE is also dependent on the dominant location where residential houses and “other” are located, since most neighbourhoods are organized, it is unlikely to see a break and enter of a residence in an industrial or commercial district. Additionally, both locations could feature a higher amount of incidences in their allotted regions due to greater ticketing occurrence or greater police activity in that specific area due to specified patrol routes or law enforcement placement.   
+
+
+## Conclusion
+
+|           To conclude clustering was found for both datasets based on the results of all the statistical tests, as well they were found be to be predominantly clustered in similar downtown / East Vancouver locations, with BNE featuring a slightly greater density along the Northern side of the Fraser River. 
+|           The exact causes for these locations and crimes to be clustered cannot be said for certain as multiple factors could be contributing to their placement, such as: socioeconomic demographics at those locations, the overall locations of residences, and the overall law enforcement presence within the area. 
+|           Some limitations of this study can be found in production of the initial data, specifically the reduction in accuracy for the preservation of privacy of parties involved in the criminal activity, possible edge effects from the quadrat analysis as well as optimizing cell size/ quadrat count for that analysis could also be considered for error. Finally selecting the optimal kernel size for the KDE analysis could also be considered as a source of error, as the estimations produces both featured deviations between 15- 50 meters in their size and the proposed ideal kernel size. 
+|           Further adaptions of this concept could include a variety of other data to delineate what factors may be causing these crimes to occur in the areas that they do. Examples of this data could be census profile average income vectors, school locations, proximity to liquor stores, near by institutions etc.… 
+
+
+
+
+
+## References
+
+|           Bawagan, L. (2017). REGRESSION & CORRELATION ANALYSIS OF CRIME IN THE CITY. In Geographical Biogeosciences. http://blogs.ubc.ca/luciampbawagan/files/2017/12/lab3_2017_answersheet.pdf
+  
+  
+|           Mahony, H. (2017). Women and the Criminal Justice System. Statcan.gc.ca. https://www150.statcan.gc.ca/n1/pub/89-503-x/2015001/article/14785-eng.htmStatistics Canada. (2017, February 8). 
+  
+  
+|           Census Profile, 2016 Census - Greater Vancouver, Regional district [Census division], British Columbia and British Columbia [Province]. Www12.Statcan.gc.ca. https://www12.statcan.gc.ca/census-recensement/2016/dp-pd/prof/details/page.cfm?Lang=E&Geo1=CD&Code1=5915&Geo2=PR&Code2=59&Data=Count&SearchType=Begins&SearchPR=01&B1=All
+  
+  
+|           Vancouver Police Department. (2020). VPD OPEN DATA. Geodash.vpd.ca. https://geodash.vpd.ca/opendata/
+
