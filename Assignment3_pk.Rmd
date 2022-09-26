@@ -1,0 +1,532 @@
+---
+title: "Assignment 3"
+author: "Geog 418/518-Student"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: 
+  bookdown::html_document2:
+    number_sections: false
+    fig_caption: true
+    global_numbering: true 
+    #figcap: yes
+  #IN ORDER FOR THIS DOCUMENT TO FUNCITON PROPERLY PLEASE SET THE DIRECTORY (line 63!)
+  # as well as include directories for the associated png files (lines: 129, 200 and 205!)
+      #FORMATTING FOR PNG BELOW!
+  #[Study Map](C:/Users/student/Documents/Geog 418/Assignment3/study_area_map.png)
+    #              # ^ your directory AND the name of the png file at the end ^
+---
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+## For this lab you will need the following libraries: 
+##bookdown knitr, rgdal, tmap, spdep, raster, shinyjs, e1071
+
+
+dir <- "C:/Users/philk/Desktop/Spring 2022/Geog 418/Assignment 3/Assignment3"
+knitr::opts_knit$set(root.dir = dir)
+ 
+```
+
+## Introduction
+|       Understanding the spatial patterns and attributes of data can provide insight into whether or not there is some spatial correlation to a set of data or objects. Having the ability to discern the spatial autocorrelation of a data set enables further perception of the attributes and the studied element. With this information, the relation between attributes allows for conclusions to be drawn and possibly decisions made. In order to determine this spatial auto correlation, using the Morans I test and even more so the Local Morans' I test (Luc Anselin, 1995), as they are both an effective mode in the search for answering questions regarding spatial autocorrelation.
+
+
+|       Through the course of this report, tests for spatial auto correlation of median Income and renting cost from Statistics Canada's 2016 census will be performed. The census data provides a unique opportunity as it can be easily joined with spatial data, dissemination areas, enabling statistical tests to be run upon the data. The test will also be constrained to the Niagara Region in St. Catherines Ontario. Additionally, this markdown / bookdown file will provide insight on how this report was produced. This will also include a rundown of data cleaning for the census data, analysis via local and global Morans' I as well as how to present the results within R and markdown. This will allow future tests for spatial correlation by other parties. As well it should be noted that lots of census data is open sources, or does not require much licensing to get access to allowing a variety of socioeconomic attributes to be analyzed by nearly anyone, with the right direction. 
+
+
+```{r, packages and libraries, echo=FALSE, eval=TRUE, message=FALSE, warning=TRUE}
+ 
+# install.packages("knitr")
+# install.packages("rgdal")
+# install.packages("tmap")
+# install.packages("spdep")
+# install.packages("raster")
+# install.packages("shinyjs")
+# install.packages("e1071")
+# install.packages("bookdown")
+# install.packages("ggplot2")
+# install.packages("png")
+
+library(knitr)
+library(rgdal)
+library(tmap)
+library(spdep)
+library(raster)
+library(shinyjs)
+library(e1071)
+library(ggplot2)
+library(png)
+```
+
+```{r, Read in data, echo=FALSE, eval=TRUE, warning=TRUE, message=FALSE}
+
+# Setting working directory 
+dir <-  "** SET WORKING DIRECTORY HERE **"
+setwd(dir) 
+
+#import data
+csv <- read.csv("./census_data.csv") 
+shp <- readOGR(dsn ="." , layer = "lda_000b16a_e" , verbose = FALSE) 
+
+```
+
+```{r, Clean_data, echo=FALSE, eval=TRUE, warning=TRUE, message=FALSE}
+
+#prep variable names to set csv col names
+cols <- c("GEO_UID",        
+          "ProvinceCode", 
+          "ProvinceName", 
+          "CDCode",     
+          "CDName",       
+          "DAName",       
+          "Pop_Dwell_2016",  
+          "Pop_Dwell_sqrKM",  
+          "Median_Income",   
+          "Med_Dwell_Cost",            
+          "Insec_30perc",     #"insecure housing, (too expensive for inc) # REDUNDANT
+          "Renters",          # amount of renters 
+          "Dist_15-64",       # % of people in category
+          "avg_age")         
+
+#set col names using variable
+colnames(csv) <- cols
+
+#Find digit length for number of characters in CSV 
+csv$len <- nchar(csv$GEO_UID) 
+
+# query data for all variables for analysis
+csv_clean <- subset(csv, csv$len == 8)  
+
+
+```
+
+```{r, Select Data, echo= FALSE, eval= TRUE, warning= TRUE, message=FALSE}
+
+#Join Census data to shapefile
+census_DAs <- merge(shp, csv_clean, 
+                    by.x = "DAUID", 
+                    by.y = "GEO_UID", 
+                    all.x = TRUE)
+
+#extract data from CDA matching SHP names, store in municip
+Municp <- subset(census_DAs, census_DAs$CDNAME =="Niagara") # find spec. municip
+
+# Store income and insecure housing data into var, removing N/A values
+Income_noNA <- Municp[which(!is.na(Municp$Median_Income)),]
+
+#Dwelling_Avg <- Municp[which(!is.na(Municp$Avg_Dwell_Cost)),]
+Dwelling_Med <- Municp[which(!is.na(Municp$Med_Dwell_Cost)),]
+
+```
+
+
+``` {r, BaseMap,  echo= FALSE, message =FALSE , eval= TRUE, warning= TRUE, fig.cap= "Study Area" , fig.asp= 1 }
+
+tmap_mode ("view") # setting map mode to interactive w/ esri basemap 
+
+```
+|  
+|  
+[Study Map](# YOUR DIRECTORY HERE #
+/study_area_map.png)  
+Figure 1. Study area map of Niagara region in St. Catherines Ontario
+
+**This blog post assumes the reader has knowledge of data importing and cleaning, and thus will not display it in the html, however, documentation can be found within the associated markdown file**
+
+```{r, IncomeMap, echo= FALSE, eval= TRUE, warning= TRUE,message=FALSE, fig.cap="Median Income 2016", fig.asp=1}
+
+#tmaptools::palette_explorer() #Tool for selecting pallettes
+
+# create a map for median income 
+map_Income <- tm_shape(Income_noNA) + 
+  tm_polygons(col = "Median_Income", 
+              title = "Median Income 2016", 
+              style = "fisher", 
+              palette = "PuBu", n = 7, # rm virdis palette
+              border.alpha = 0,
+              colorNA = "black") +
+  tm_layout(legend.position = c("RIGHT", "TOP"))
+
+#display income map
+map_Income
+
+```
+Figure 2. Median Income in 2016 from Stats Can
+|  
+```{r, RentingMap, echo= FALSE, eval= TRUE, warning= TRUE, message=FALSE, fig.cap= "Median Renting Cost 2016" , fig.asp= 1 }
+
+#tmaptools::palette_explorer() # tool for selecting different colour palettes 
+
+#create map to display median renting cost by neighbourhood
+
+map_Renting <- tm_shape(Dwelling_Med) + 
+  tm_polygons(col = "Med_Dwell_Cost", 
+              title = "Median Renting Cost 2016", 
+              style = "fisher", 
+              palette = "BuPu", n = 7, # rm virdis palette
+              border.alpha = 0,
+              colorNA = "black") +
+  tm_layout(legend.position = c("RIGHT", "TOP"))
+
+#display map
+map_Renting
+
+```
+Figure 3. Median Renting Cost in 2016 from Stats Can
+|  
+
+### Global Morans' I and Matrices
+
+|       The Morans' I test is designed to determine whether or not a data set can be considered, clustered, dispersed or random in its spatial distribution. Performing this test enables a relatively quick result depicting the spatial characteristics of a data set, though it is not as in depth and specific as the local Moran, more on that later. The test itself functions by comparing each polygon and its neighbours by the mean of the studied attribute. If a polygon and all its neighbours are all greater than the mean of the data set then it can be concluded that those polygons/ neighbours exhibit positive spatial correlation. Similarly if a polygon and all its neighbours are all less than the mean of the data set, they are also positively spatially correlated. In order for a polygon and its neighbours to be negatively spatially correlated there must be a difference between that polygon and its surrounding neighbours with relation to the mean, i.e. a polygon is greater than the mean, but its neighbours are below it, then we can say spatial auto correlation is negative.
+
+|       As well before a Morans' test is performed a hypothesis must be established in order for this analysis to be a valid statistical analysis. So, the null hypothesis for this analysis is _the median income and renting cost within the Niagara region is randomly distributed over space._
+
+
+$$
+\displaystyle I =\frac {\sum_{i=l}^n\sum_{j=l}^n w_{i,j} (x_i-\overline{x})(x_j-\overline{x})}  {(\sum_{i=l}^n\sum_{j=l}^n w_{i,j}) \sum_{i=l}^n (x_i-\overline{x})  }
+$$
+|       In the numerator of the formula i represents the current polygon, j represents all the neighbours to this polyogn, where we are summing the difference between the polygons' value and the mean of BOTH the current polygon as well as the difference between the neighbouring polygons and the mean. These are then multiplied by the weight _w_ of the neighbours. The denominator in the formula is standardizing the values for comparison to the expected Morans' I.
+
+|       The following formula represents the 'ideal' or totally random distribution, depending on where our actual Morans' statistic falls we can determine the spatial auto correlative characteristic of the studied attribute. i.e. if the calculated Moran statistic is greater than the expected, the data suggests clustering, if the stat is below, it is dispersed. The closer the Morans' statistic is to the expected value the more random. 
+$$
+\displaystyle E(I) = \frac {-1} {n=1}
+$$
+
+|       Now in order for this process to work, the neighbours of each polygon must be determined. To do this we must create a spatially weighted matrix, which determines out of the surrounding polygons which will be involved in the morans' I calculation for each set. There are a few methods for defining neighbourhoods, the foremost within the field are the rook and queen weights.As seen in the figures below...A rook will determine if a neighbouring polygon will be included in the calculation IF it shares a face or side of the current polygon. On the other hand a queen weighting will determine that any polygon which shares a vertex with the current polygon as a neighbour. 
+|  
+|  
+[Queen Weighting]( #YOUR DIRECTORY HERE#
+/queen_w.PNG)
+Figure 4. Queen Matrix Weighting Example
+|  
+|  
+[Rook Weighting](# YOUR DIRECTORY HERE
+/rook_w.PNG)
+Figure 5. Rook Matrix Weighting Example
+|  
+
+**This code snippet describes how to create different matrices in R:**
+```{r Create Matrices for Income, echo= TRUE, eval= TRUE, warning= FALSE,message=FALSE}
+## Create Matrices for income for later morans' I tests
+
+# Create queen matrix with income data
+Income.nb_Queen <- poly2nb(Income_noNA) # create neighbourhood list, on shared vertices
+#define neighbour queens weight, default = queen
+
+Income.net_Queen <- nb2lines(Income.nb_Queen, coords=coordinates(Income_noNA))
+#^^apply weights to neighbours
+crs(Income.net_Queen) <- crs(Income_noNA) # match coordinate system
+
+#Make rook matrix
+Income.nb_Rook <- poly2nb(Income_noNA, queen = FALSE) 
+# to switch to rooks make queen = #false, and vise versa 
+Income.net_Rook <- nb2lines(Income.nb_Rook, coords=coordinates(Income_noNA)) 
+crs(Income.net_Rook) <- crs(Income_noNA) # Ensure coordiante systems are equivalent
+
+#create spatial interpretation of Matrices
+IncomeQueen <- tm_shape(Income_noNA) + tm_borders(col='lightgrey') + 
+  tm_shape(Income.net_Queen) + tm_lines(col='orange') 
+
+IncomeRook <- tm_shape(Income_noNA) + tm_borders(col='lightgrey') + 
+  tm_shape(Income.net_Rook) + tm_lines(col='blue', lwd = 2) 
+
+IncomeBoth <- tm_shape(Income_noNA) + tm_borders(col='lightgrey') + 
+  tm_shape(Income.net_Queen) + tm_lines(col='orange', lwd = 2) +
+  tm_shape(Income.net_Rook) + tm_lines(col='blue', lwd = 2)
+ 
+# Create neighbourhood weight matrix dataframe
+Income.lw <- nb2listw(Income.nb_Queen, zero.policy = TRUE, style = "W")
+#lists neighbours and adds weight to them, w = row standardized method, which is summing 
+#all rows in the data frame. 
+```
+
+```{r, Matrices for Renting, echo= FALSE, eval= TRUE, warning= FALSE, message=FALSE}
+## Create Matrices for Renting data, for morans' I analysis
+
+#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!#
+##SEE Create Matrices for Income FOR FULL DOCUMENTATION OF CODE##
+
+# Stats on Neighbourhoods Rent
+Rent.nb_Queen <- poly2nb(Dwelling_Med)
+Rent.net_Queen <- nb2lines(Rent.nb_Queen, coords=coordinates(Dwelling_Med))
+crs(Rent.net_Queen) <- crs(Dwelling_Med)
+#define neighbour queens weight, defaut = queen
+
+Rent.nb_Rook <- poly2nb(Dwelling_Med, queen = FALSE) # to switch to rooks make queen = false, and vise versa 
+Rent.net_Rook <- nb2lines(Rent.nb_Rook, coords=coordinates(Dwelling_Med))
+crs(Rent.net_Rook) <- crs(Dwelling_Med)
+
+RentQueen <- tm_shape(Dwelling_Med) + tm_borders(col='lightgrey') +
+  tm_shape(Rent.net_Queen) + tm_lines(col='red')#+ tm_polyons( title = "Rent Queen")
+
+RentRook <- tm_shape(Dwelling_Med) + tm_borders(col='lightgrey') + 
+  tm_shape(Rent.net_Rook) + tm_lines(col='green', lwd = 2)
+
+RentBoth <- tm_shape(Dwelling_Med) + tm_borders(col='lightgrey') + 
+  tm_shape(Rent.net_Queen) + tm_lines(col='blue', lwd = 2) +
+  tm_shape(Rent.net_Rook) + tm_lines(col='orange', lwd = 2)
+
+#tmap_arrange(RentQueen, RentRook, RentBoth, ncol = 3, nrow = 1)
+
+# Create neighbourhood weight matrix
+Rent.lw <- nb2listw(Rent.nb_Rook, zero.policy = TRUE, style = "W")
+
+```
+
+```{r, Matrices Maps, echo= TRUE, eval= TRUE, warning= FALSE, message=FALSE, fig.cap = "Neighbourhood Matrices", fig.asp=1 }
+
+# Create map displaying rook and queen matrix methods and one map w/ both
+tmap_arrange(IncomeQueen, IncomeRook, IncomeBoth, ncol = 3, nrow = 1, sync= T)
+
+```
+Figure 6. Created Matrices for Niagara St. Catherines, including rook(in blue), queen(in orange) and both
+
+### Matrices Produced
+|       Above are the matrices produced for the Morans' I test. For this application we will be using a queen matrix to get more diverse coverage for the area. Normally using the rook weighting would make sense for uniformly spaced polygons, or squares as seen in _figures 4-5_. Given the Niagara region features many irregularly shaped polygons, using a queen weighting will be suitable for this test. 
+|  
+|  
+
+**This snippet of code will display how to perform a Morans' I test within R and generate the outputs, documentation included.**
+```{r, Global Morans I RENT, echo= TRUE, eval= TRUE, warning= TRUE, message=FALSE}
+
+# Run morans' I global on renting data
+miRent <- moran.test(Dwelling_Med$Med_Dwell_Cost,
+                       Rent.lw,
+                       zero.policy = TRUE)
+
+#extract Global moran's I vals
+mIRent <- miRent$estimate[[1]] # stat test 3x 
+eIRent <- miRent$estimate[[2]]  # expected
+varRent <- miRent$estimate[[3]] # global variance
+
+# create func for option potential moran;s i range
+moran.range <- function(lw) {
+  wmat <- listw2mat(lw)
+  return(range(eigen((wmat + t(wmat))/2)$values)) 
+}
+#FIND RANGE
+range_Rent <- moran.range(Rent.lw)
+
+#make calculate zscore
+z_rent <- (mIRent - eIRent) / (sqrt(varRent)) # recreate z score 
+```
+
+```{r, Global Morans I INCOME, eval=TRUE, echo=FALSE, message=FALSE, warning=TRUE}
+
+# Run morans' I global Income
+
+miIncome <- moran.test(Income_noNA$Median_Income, 
+                       Income.lw, 
+                       zero.policy = TRUE)
+
+#extract Global moran's I vals
+mIIncome <- miIncome$estimate[[1]] # stat test 3x
+eIIncome <- miIncome$estimate[[2]]  # expected
+varIncome <- miIncome$estimate[[3]] # global variance 
+
+# create func for option potential moran;s i range
+moran.range <- function(lw) {
+  wmat <- listw2mat(lw)
+  return(range(eigen((wmat + t(wmat))/2)$values))
+  }
+#FIND RANGE
+range_Income <- moran.range(Income.lw) 
+
+#make calculate zscore
+z_income <- (mIIncome - eIIncome) / (sqrt(varIncome)) # recreate z score formula
+
+#create stat table displaying statistical results
+
+```
+
+
+Table 1 - 3. Global Morans' Statistical Tables.
+
+```{r, Global Morans I Stat Table, eval=TRUE, echo=FALSE, message=TRUE, warning=TRUE}
+
+#display stat table displaying statistical results
+miIncome
+miRent
+
+
+stat_table <- data.frame(format(round(z_income,digits = 3),nsmall=3), format(round(z_rent,digits =3),nsmall=3)) # put stat data into dataframe, and set sig figs
+
+stat_tbl_cols<- c("Median Income", "Median Rent Cost") # set col names
+stat_tbl_rws<- "Z-scores"                             # set row names
+colnames(stat_table)<- stat_tbl_cols
+rownames(stat_table)<- stat_tbl_rws
+
+kable(stat_table) # create table from stat dataframe for z -scores
+```
+
+### Global Morans' I Results Discussion
+
+|       Viewing the data from the median income data set we can see that there is some level of spatial auto correlation occurring in different locations within the Niagara region. This does appear to be occurring in locations where polygons are irregularly shaped, and are overall busier, downtown regions. The calculated Morans' statistic is greater than the expected spatially random output which suggests there is clustering within the dataset. Additionally the measured P-values are considerably small which in addition to the related z-score of income (~27) which is substantially greater than 1.96 which allows us to reject the null hypothesis, and state that there is positive spatial auto correlation occurring regarding median income within the Niagara region.
+|  
+|       Similarly comparing the data from the median renting census there are many locations which can be seen in _Figure 3_ there does appear to be spatial auto correlation occurring, though some of these could are the same polygons which featured a median renting cost of 0, (they did not have data from renters or the neighbourhood did not have renters at all), though this makes this analysis inaccurate, the end goal is to demonstrate how to perform a Morans' I test and generate weighted matrices. A mask or filter could be applied to withhold polygons which did not feature the data, however that is beyond the scope of this demonstration. 
+|       Continuing onto the Morans' statistic for this data set we again see that our Morans' statistic is greater than the proposed ideal random measure, which indicates clustering in the data. The z score again greatly surpasses the critical value 1.96 and our p value again is far less than 0.001 so the confidence interval for the calculation is highly probable.
+|  
+|  
+
+### Local Morans' I Description
+|       Local Morans' I is largely similar to global, there difference found between the two tests is comparing each observation/ location by its neighbours. Where the global Morans' I computed the _I_ , variance, z value and ideal/ expected value. The local Morans' I calculates those values for every iteration of polygon. 
+
+$$
+l_i= \frac {x_i -\overline{x}}{S_i^2} \sum_{j=1}^n w_{i,j} (x_i -\overline{X})
+$$
+
+|       So _li_ differentiates its own value from the mean multiplied by the total differences of its neighbours and the mean. Additionally in the denominator of the formula is the standard deviation of i, which can be determined with the following formula:
+
+$$
+S_i^2 = \frac {\sum_{j=1}^n (x_j - \overline{X})^2} {n-1}
+$$
+
+|       The local Morans' I test also utilizes a expected or ideal random value as well, just like with the global Morans' I we can compare the expected value with the calculated Mornas' I to determine the spatial auto correlation that is occurring within the data set. calculated using the following formula:
+
+$$
+E[l_i] = - \frac {\sum_{j=1}^n w_{i,j}}{n-1}
+$$
+
+|       Next we can use a z-test to determine if the difference between the Morans' I for each iteration deviates from the expected random using the following formula:
+
+$$
+Z_I{_i} = \frac {I_i- E[l_i]}{\sqrt{V[l_i]}}  
+$$
+
+
+### Local Morans' I Example and Results
+  
+**The following code snippet shows how to perform a local Morans I test and display an associated map:**
+
+```{r, Local Morans Test & Maps INCOME, echo= TRUE, eval= TRUE,message=FALSE, warning= TRUE, fig.cap = "Income LISA Map", fig.asp=1}
+
+#tmaptools::palette_explorer()
+# Run local moran's I test Income
+lisa.testIncome <- localmoran(Income_noNA$Median_Income, Income.lw)
+#Extract Local Morans' variables 
+Income_noNA$Ii <- lisa.testIncome[,1]     # local moran stat
+Income_noNA$E.Ii<- lisa.testIncome[,2]   # find expected / ideal
+Income_noNA$Var.Ii<- lisa.testIncome[,3]  # find variance
+Income_noNA$Z.Ii<- lisa.testIncome[,4] # z- test 
+Income_noNA$P<- lisa.testIncome[,5]    # find p value
+
+#Map stat signif lisa results INCOME
+#Create maps for morans stat AND estimated
+map_LISA_Income_I <- tm_shape(Income_noNA) +
+  tm_polygons(col = "Ii",
+              title = "Local Morans' I Statistic Income",
+              style = "jenks",
+              border.alpha = 0.1,
+              palette = "PuOr", n = 6)
+
+map_LISA_Income_P <- tm_shape(Income_noNA) +
+  tm_polygons(col = "E.Ii",
+              title = "Local Morans' Estimated I Income ",
+              style = "jenks",
+              border.alpha = 0.1,
+              palette = "Blues", n = 6)
+
+map_LISA_Income_Z <- tm_shape(Income_noNA) +
+  tm_polygons(col = "Z.Ii",
+              title = "Local Morans' I Significant Income ",
+              style = "jenks",
+              border.alpha = 0.1,
+              palette = "OrRd", n = 7)
+
+#display grouping map
+tmap_arrange(map_LISA_Income_I, map_LISA_Income_P, map_LISA_Income_Z, ncol = 3, nrow = 1, sync= T)
+
+
+
+```
+
+Figure 7. Median Income Local Morans I, Expected I and Significant I Respectively  
+|
+
+```{r, Local Morans Test & Map RENT, echo= FALSE, eval= TRUE, message=FALSE, warning= TRUE, fig.cap = "Renting LISA Map", fig.asp=1}
+
+#tmaptools::palette_explorer()
+#Run locla moran's I test RENT
+lisa.testRent <- localmoran(Dwelling_Med$Med_Dwell_Cost, Rent.lw)
+#Extract Local Morans' variables
+Dwelling_Med$Ii <- lisa.testRent[,1]
+Dwelling_Med$E.Ii<- lisa.testRent[,2]
+Dwelling_Med$Var.Ii<- lisa.testRent[,3]
+Dwelling_Med$Z.Ii<- lisa.testRent[,4] # determines if signif. Auto-corr
+Dwelling_Med$P<- lisa.testRent[,5]
+
+#Map stat signif lisa results RENT
+map_LISA_Rent_I <- tm_shape(Dwelling_Med) +
+  tm_polygons(col = "Ii",
+              title = "Local Morans' I for Renting Cost",
+              style = "jenks",
+              border.alpha = 0.1,
+              palette = "PuOr", n = 6)
+
+map_LISA_Rent_P <- tm_shape(Dwelling_Med) +
+  tm_polygons(col = "E.Ii",
+              title = "Local Morans' Estimated I Rent Cost ",
+              style = "jenks",
+              border.alpha = 0.1,
+              palette = "Blues", n = 6)
+
+map_LISA_Rent_Z <- tm_shape(Dwelling_Med) +
+  tm_polygons(col = "Z.Ii",
+              title = "Local Morans' I Significant Rent Cost",
+              style = "jenks",
+              border.alpha = 0.1,
+              palette = "OrRd", n = 7)
+
+#display grouping map
+tmap_arrange(map_LISA_Rent_I, map_LISA_Rent_P, map_LISA_Rent_Z,  ncol = 3, nrow = 1, sync= T)
+
+```
+
+Figure 8. Rent Cost Local Morans I, Expected I and Significant I Respectively   
+|
+
+**The following code snippet creates a Morans Scatter plot for the income data set: **
+```{r,  Morans Scatter Plot INCOME, echo= TRUE, eval= TRUE, warning= TRUE, message=FALSE, fig.asp=1}
+
+#make morans' scatter plot Income
+moran.plot(Income_noNA$Z.Ii, Income.lw, zero.policy=TRUE, spChk=NULL, labels=NULL, 
+           xlab="Income", 
+           ylab="Spatially Lagged Income", quiet=NULL)
+
+
+```
+
+Figure 9. Local Morans' scatter plot for median income  
+|  
+
+```{r,  Morans Scatter Plot RENT, echo= FALSE, eval= TRUE, warning= TRUE,message=FALSE, fig.asp=1}
+
+#make morans' scatter plot Rent
+moran.plot(Dwelling_Med$Z.Ii, Rent.lw, zero.policy=TRUE, spChk=NULL, labels=NULL,
+           xlab="Renting Cost",
+           ylab="Spatially Lagged Renting Cost", quiet=NULL)
+```
+
+Figure 10. Local Morans' scatter plot for median rent cost.  
+|  
+  
+### Results of Local Morans' I  
+|       Starting with the results from the income data, there is definitive evidence that  spatial auto correlation can be seen in _figure 7_. Though the extent of the correlation cannot be fully described with the map on its own, we can certainly see both some dispersion and clustering occurring, in many locations these results are found to be significant as well in the respective third tiles of the interactive maps.
+|       Supplementing the local income I map with _figure 9_ the data does appear to be fitting to the model rather well. Many points from the local Moran are landing near their expected values suggesting there is randomness to the spatial distribution. That said on the tail ends of the graph the diamond markers show that there is some significant clustering and dispersion occurring at some locations. Looking back at the maps closely we can see that there are around four locations which do match the criteria. Interestingly many of these findings are also focused on regions that had the complex or irregular polygons. This could potentially mean that if the rook model was used for the local Morans' I results could be different. Given the scope of this example blog post however, the produced results see noticeable spatial auto correlation, which enables us to reject the null hypothesis for median income in the Niagara region.
+
+|       Moving onto the median renting Morans' I results briefly looking at _figure 8_ we can quickly discern that there is substantial auto correlation occurring within this data set. Though the most noticeable results are occurring in the locations which originally were devoid of renting data, looking closely, there is still statistically significant results found in other neighbourhoods. 
+|       Once again looking to the scatter plot _figure 10_ there appears to be more noise in this data set when compared to the income data however, the results themselves arguably follow the fitting line more closely. Additionally again there are many points which are determined to be significant both regarding clustering and perhaps more prevalently dispersion.
+
+
+
+## Summary
+|       To summarize outlined in this hmtl blog post was a run down of how the two spatial statistical tests: global and local Morans' I function and what they determine regarding spatial distribution and spatial auto correlation. Throughout the document are a variety of code snippets describing the methods and syntax for performing these tests on census data. Although the analysis of the example renting data was not quite accurate as it featured locations without data (no renters) irregardless, the Morans' tests still provided results on the appropriate locations. If a future analysis was to be performed on that data it could be wise to either mask out regions which do not feature renting data, or remove all locations where renting cost was equal to zero, although that would also provide issues in determining neighbours as well. As well as the field of geography further developes its methods, interesting tests have also been done with temporal elements in conjunction with morans' tests which could provide additional information on the subject of income distribution. This could be done by comparing multiple census periods, together the data could provide an insight as to possible other indicators or events which are driving the income within these areas.
+|       Regarding the results for both Morans' tests it was concluded that all for tests and their respective data set exhibited a statistically significant deviation from their respective 'ideal' Morans' I. The findings regarding the clustering foudn in the income data set are also supported by previous literature (Janikas & Rey, 2004) relating to the subject of spatial autocorrelation. 
+
+
+
+## References
+|       Anselin, L. (2010). Local Indicators of Spatial Association-LISA. Geographical Analysis, 27(2), 93–115. https://doi.org/10.1111/j.1538-4632.1995.tb00338.x
+|  
+|       Canadian Census Analyzer. (2017). 2016 Census. Canadian Census Analyzer; University of Toronto. http://dc1.chass.utoronto.ca.ezproxy.library.uvic.ca/cgi-bin/census/2016/displayCensus.cgi?year=2016&geo=da
+|  
+|       Janikas, M., & Rey, S. (2004). Spatial Clustering, Inequality and Income Convergence *. https://econwpa.ub.uni-muenchen.de/econ-wp/urb/papers/0501/0501002.pdf
